@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CHIME — the marble run that plays music</title>
+<style>
+  :root { --hue: 190; }
+  * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #04050c; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; color: #dfe6ff; }
+  canvas { position: fixed; inset: 0; display: block; cursor: crosshair; }
+
+  /* ---------- top bar ---------- */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0; height: 64px; z-index: 10;
+    display: flex; align-items: center; gap: 18px; padding: 0 20px;
+    background: linear-gradient(180deg, rgba(6,8,18,.82), rgba(6,8,18,.38) 80%, transparent);
+    pointer-events: none;
+  }
+  #hud > * { pointer-events: auto; }
+  #brand { display: flex; flex-direction: column; gap: 1px; min-width: 150px; pointer-events: none; }
+  #brand .t {
+    font-size: 19px; font-weight: 300; letter-spacing: .45em; color: #fff;
+    text-shadow: 0 0 18px hsla(var(--hue), 90%, 65%, .8);
+  }
+  #brand .s { font-size: 10px; letter-spacing: .12em; color: rgba(210,220,255,.45); }
+
+  .moods { display: flex; gap: 6px; }
+  .mood {
+    display: flex; align-items: center; gap: 7px; padding: 6px 13px; border-radius: 99px;
+    background: rgba(16,20,40,.5); border: 1px solid rgba(255,255,255,.07);
+    font-size: 12px; letter-spacing: .08em; color: rgba(220,228,255,.65);
+    cursor: pointer; backdrop-filter: blur(10px); transition: all .25s;
+  }
+  .mood .dot { width: 8px; height: 8px; border-radius: 50%; background: hsl(var(--mh), 85%, 62%); box-shadow: 0 0 8px hsl(var(--mh), 85%, 62%); }
+  .mood:hover { border-color: rgba(255,255,255,.2); color: #fff; }
+  .mood.on {
+    background: hsla(var(--mh), 70%, 55%, .16); border-color: hsla(var(--mh), 85%, 65%, .55);
+    color: #fff; box-shadow: 0 0 18px hsla(var(--mh), 85%, 60%, .25);
+  }
+
+  #stats { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .chip {
+    padding: 6px 12px; border-radius: 10px; font-size: 12px; letter-spacing: .05em;
+    background: rgba(16,20,40,.5); border: 1px solid rgba(255,255,255,.07);
+    color: rgba(220,228,255,.8); backdrop-filter: blur(10px); white-space: nowrap;
+  }
+  .chip b { color: #fff; font-weight: 600; }
+  .chip.alert { animation: shake .3s; border-color: rgba(255,90,110,.8); color: #ffb3bd; }
+  @keyframes shake { 25% { transform: translateX(-3px);} 75% { transform: translateX(3px);} }
+
+  #resonance { display: flex; align-items: center; gap: 8px; }
+  #resonance .label { font-size: 10px; letter-spacing: .22em; color: rgba(220,228,255,.5); transition: all .4s; }
+  #resonance.full .label { color: hsl(var(--hue), 90%, 72%); text-shadow: 0 0 12px hsla(var(--hue), 90%, 65%, .9); }
+  #resbar { width: 90px; height: 5px; border-radius: 99px; background: rgba(255,255,255,.08); overflow: hidden; }
+  #resfill {
+    height: 100%; width: 0%; border-radius: 99px; transition: width .5s;
+    background: linear-gradient(90deg, hsla(var(--hue),80%,55%,.7), hsl(var(--hue),95%,68%));
+    box-shadow: 0 0 10px hsla(var(--hue), 90%, 62%, .8);
+  }
+
+  .icon-btn {
+    width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+    background: rgba(16,20,40,.5); border: 1px solid rgba(255,255,255,.07);
+    color: rgba(220,228,255,.75); font-size: 14px; cursor: pointer; backdrop-filter: blur(10px);
+    transition: all .2s;
+  }
+  .icon-btn:hover { border-color: rgba(255,255,255,.25); color: #fff; }
+
+  /* ---------- palette ---------- */
+  #palette {
+    position: fixed; left: 16px; top: 50%; transform: translateY(-50%); z-index: 10;
+    display: flex; flex-direction: column; gap: 8px; padding: 10px;
+    background: rgba(10,14,30,.55); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 18px; backdrop-filter: blur(14px);
+  }
+  .tool {
+    position: relative; width: 58px; padding: 8px 0 6px; border-radius: 12px; cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    border: 1px solid transparent; transition: all .2s; color: rgba(220,228,255,.75);
+  }
+  .tool:hover { background: rgba(255,255,255,.05); color: #fff; }
+  .tool.on {
+    background: hsla(var(--hue), 70%, 55%, .14); border-color: hsla(var(--hue), 85%, 65%, .5);
+    color: #fff; box-shadow: 0 0 16px hsla(var(--hue), 85%, 60%, .2);
+  }
+  .tool svg { width: 26px; height: 26px; }
+  .tool .nm { font-size: 9px; letter-spacing: .14em; text-transform: uppercase; opacity: .8; }
+  .tool .cost {
+    position: absolute; top: 3px; right: 5px; font-size: 9px; color: rgba(220,228,255,.45);
+  }
+  .tool .key {
+    position: absolute; top: 3px; left: 6px; font-size: 8px; color: rgba(220,228,255,.3);
+  }
+
+  /* ---------- hint ---------- */
+  #hint {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 10;
+    font-size: 11px; letter-spacing: .1em; color: rgba(210,220,255,.4);
+    pointer-events: none; text-align: center; text-shadow: 0 1px 4px rgba(0,0,0,.8);
+  }
+
+  /* ---------- start overlay ---------- */
+  #overlay {
+    position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+    background: radial-gradient(ellipse at 50% 40%, rgba(10,16,40,.6), rgba(3,4,10,.94));
+    backdrop-filter: blur(4px); cursor: pointer; transition: opacity .8s;
+  }
+  #overlay.gone { opacity: 0; pointer-events: none; }
+  #overlay .card { text-align: center; }
+  #overlay .big {
+    font-size: 56px; font-weight: 200; letter-spacing: .6em; margin-left: .6em; color: #fff;
+    text-shadow: 0 0 40px hsla(var(--hue), 90%, 65%, .9), 0 0 90px hsla(var(--hue), 90%, 55%, .5);
+    animation: breathe 4s ease-in-out infinite;
+  }
+  @keyframes breathe { 50% { text-shadow: 0 0 60px hsla(var(--hue),90%,70%,1), 0 0 120px hsla(var(--hue),90%,55%,.7); } }
+  #overlay .tag { margin-top: 14px; font-size: 14px; letter-spacing: .2em; color: rgba(215,225,255,.65); }
+  #overlay .go { margin-top: 46px; font-size: 12px; letter-spacing: .3em; color: rgba(215,225,255,.45); animation: fadepulse 2.2s ease-in-out infinite; }
+  @keyframes fadepulse { 50% { color: rgba(235,240,255,.9); } }
+  #overlay .dots { margin-top: 26px; display: flex; gap: 14px; justify-content: center; }
+  #overlay .dots i {
+    width: 9px; height: 9px; border-radius: 50%; background: hsl(var(--dh), 85%, 65%);
+    box-shadow: 0 0 12px hsl(var(--dh), 85%, 62%); animation: bob 2.6s ease-in-out infinite;
+    animation-delay: var(--d);
+  }
+  @keyframes bob { 50% { transform: translateY(-10px); } }
+</style>
+</head>
+<body>
+
+<canvas id="cv"></canvas>
+
+<div id="hud">
+  <div id="brand">
+    <div class="t">CHIME</div>
+    <div class="s">the marble run that plays music</div>
+  </div>
+  <div class="moods" id="moods"></div>
+  <div id="stats">
+    <div id="resonance">
+      <span class="label">RESONANCE</span>
+      <div id="resbar"><div id="resfill"></div></div>
+    </div>
+    <div class="chip" id="chipParts">parts <b>0/24</b></div>
+    <div class="chip" id="chipNotes"><b>0</b> ♪/min</div>
+    <div class="icon-btn" id="btnPause" title="pause (space)">⏸</div>
+    <div class="icon-btn" id="btnMute" title="mute (m)">🔊</div>
+    <div class="icon-btn" id="btnClear" title="clear all parts">✕</div>
+  </div>
+</div>
+
+<div id="palette"></div>
+
+<div id="hint">click to place &nbsp;·&nbsp; drag to move &nbsp;·&nbsp; right-click to remove &nbsp;·&nbsp; scroll over a ramp to tilt it &nbsp;·&nbsp; every hit is a note in key</div>
+
+<div id="overlay">
+  <div class="card">
+    <div class="big">CHIME</div>
+    <div class="tag">build the run &nbsp;·&nbsp; every bounce is a note &nbsp;·&nbsp; nothing can sound wrong</div>
+    <div class="dots">
+      <i style="--dh:185; --d:0s"></i><i style="--dh:255; --d:.3s"></i><i style="--dh:325; --d:.6s"></i><i style="--dh:145; --d:.9s"></i>
+    </div>
+    <div class="go">CLICK ANYWHERE TO BEGIN</div>
+  </div>
+</div>
+
+<script>
+'use strict';
+
+/* ============================== setup ============================== */
+
+const cv = document.getElementById('cv');
+const cx = cv.getContext('2d');
+let W = cv.width = innerWidth, H = cv.height = innerHeight;
+function resize() { // only ever called after the full script has evaluated
+  W = cv.width = innerWidth; H = cv.height = innerHeight;
+  spawner.x = clamp(spawner.x, 30, W - 30);
+  if (!started) starterLayout();
+}
+addEventListener('resize', resize);
+
+const TOP = 78;                 // playfield starts under the HUD
+const BUDGET = 24;
+const MAX_MARBLES = 9;
+const SPAWN_EVERY = 2.6;        // seconds between drops — the loop length
+const GRAV = 1050;
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/* ============================== moods ============================== */
+/* Each mood is a scale. Pitch = vertical position, quantized to the scale,
+   so anything the player builds lands in key — the Mini Metro trick. */
+
+const MOODS = [
+  { id: 'dream',    name: 'Dream',    baseMidi: 55, scale: [0, 2, 4, 7, 9],  hue: 190 }, // G major pentatonic
+  { id: 'dusk',     name: 'Dusk',     baseMidi: 57, scale: [0, 3, 5, 7, 10], hue: 275 }, // A minor pentatonic
+  { id: 'nocturne', name: 'Nocturne', baseMidi: 52, scale: [0, 2, 3, 7, 8],  hue: 330 }, // E hirajoshi
+  { id: 'aurora',   name: 'Aurora',   baseMidi: 53, scale: [0, 2, 4, 6, 9],  hue: 145 }, // F lydian pentatonic
+];
+let mood = MOODS[0];
+let notes = [];                 // [{midi, freq, name}] low → high
+
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const midiFreq = m => 440 * Math.pow(2, (m - 69) / 12);
+
+function buildNotes() {
+  notes = [];
+  for (let oct = 0; oct < 3; oct++)
+    for (const s of mood.scale) notes.push(mood.baseMidi + oct * 12 + s);
+  notes.push(mood.baseMidi + 36); // crown the ladder with the high root
+  notes = notes.map(m => ({ midi: m, freq: midiFreq(m), name: NOTE_NAMES[m % 12] }));
+  document.documentElement.style.setProperty('--hue', mood.hue);
+}
+buildNotes();
+
+function noteAt(y) {
+  const t = clamp(1 - (y - TOP) / (H - TOP), 0, 0.999);
+  return Math.floor(t * notes.length);
+}
+const noteHue = i => (mood.hue + i * 13) % 360;
+
+/* ============================== audio ============================== */
+
+let AC = null, master, dryG, wetG, drone = null;
+
+function initAudio() {
+  if (AC) { AC.resume(); return; }
+  AC = new (window.AudioContext || window.webkitAudioContext)();
+  const comp = AC.createDynamicsCompressor();
+  comp.threshold.value = -20; comp.ratio.value = 5;
+  master = AC.createGain(); master.gain.value = 0.9;
+  master.connect(comp); comp.connect(AC.destination);
+
+  dryG = AC.createGain(); dryG.gain.value = 0.85; dryG.connect(master);
+  const verb = AC.createConvolver(); verb.buffer = makeImpulse(2.2, 2.4);
+  wetG = AC.createGain(); wetG.gain.value = 0.42;
+  verb.connect(wetG); wetG.connect(master);
+  dryG.verbIn = verb;
+
+  startDrone();
+}
+
+function makeImpulse(seconds, decay) {
+  const len = AC.sampleRate * seconds;
+  const buf = AC.createBuffer(2, len, AC.sampleRate);
+  for (let ch = 0; ch < 2; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < len; i++)
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+  }
+  return buf;
+}
+
+// a barely-there root drone that sells the mood
+function startDrone() {
+  if (drone) { drone.g.gain.linearRampToValueAtTime(0, AC.currentTime + 1); drone.o1.stop(AC.currentTime + 1.1); drone.o2.stop(AC.currentTime + 1.1); }
+  const f = midiFreq(mood.baseMidi - 12);
+  const g = AC.createGain(); g.gain.value = 0;
+  g.gain.linearRampToValueAtTime(0.035, AC.currentTime + 2);
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 700;
+  const o1 = AC.createOscillator(); o1.type = 'sine'; o1.frequency.value = f; o1.detune.value = -4;
+  const o2 = AC.createOscillator(); o2.type = 'sine'; o2.frequency.value = f * 1.5; o2.detune.value = 4;
+  o1.connect(lp); o2.connect(lp); lp.connect(g); g.connect(master);
+  o1.start(); o2.start();
+  drone = { o1, o2, g };
+}
+
+// every voice runs through: pan → dry + reverb send
+function voiceOut(x) {
+  const pan = AC.createStereoPanner();
+  pan.pan.value = clamp((x / W) * 2 - 1, -0.7, 0.7);
+  pan.connect(dryG); pan.connect(dryG.verbIn);
+  return pan;
+}
+
+function playPluck(f, v, x) {           // pegs — soft kalimba pluck
+  const t = AC.currentTime, out = voiceOut(x);
+  const o = AC.createOscillator(); o.type = 'triangle'; o.frequency.value = f;
+  const lp = AC.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = f * 3; lp.Q.value = 1;
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v * 0.5, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+  o.connect(lp); lp.connect(g); g.connect(out);
+  o.start(t); o.stop(t + 0.5);
+}
+
+function playBell(f, v, x) {            // bells — FM shimmer, long tail
+  const t = AC.currentTime, out = voiceOut(x);
+  const car = AC.createOscillator(); car.type = 'sine'; car.frequency.value = f;
+  const mod = AC.createOscillator(); mod.type = 'sine'; mod.frequency.value = f * 2.4;
+  const mg = AC.createGain();
+  mg.gain.setValueAtTime(f * 1.9, t); mg.gain.exponentialRampToValueAtTime(1, t + 0.55);
+  mod.connect(mg); mg.connect(car.frequency);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v * 0.38, t + 0.003);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 1.7);
+  car.connect(g); g.connect(out);
+  car.start(t); mod.start(t); car.stop(t + 1.8); mod.stop(t + 1.8);
+}
+
+function playThump(f, v, x) {           // bumpers — round bass kick
+  const t = AC.currentTime, out = voiceOut(x);
+  const o = AC.createOscillator(); o.type = 'sine';
+  o.frequency.setValueAtTime(f * 0.5, t);
+  o.frequency.exponentialRampToValueAtTime(f * 0.27, t + 0.1);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v * 0.85, t + 0.004);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+  o.connect(g); g.connect(out);
+  o.start(t); o.stop(t + 0.35);
+}
+
+function playChime(f, v, x) {           // ramps — glassy strike
+  const t = AC.currentTime, out = voiceOut(x);
+  const g = AC.createGain();
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v * 0.3, t + 0.003);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 1.0);
+  const o1 = AC.createOscillator(); o1.type = 'sine'; o1.frequency.value = f;
+  const o2 = AC.createOscillator(); o2.type = 'sine'; o2.frequency.value = f * 3.02;
+  const g2 = AC.createGain(); g2.gain.value = 0.22;
+  o1.connect(g); o2.connect(g2); g2.connect(g);
+  g.connect(out);
+  o1.start(t); o2.start(t); o1.stop(t + 1.05); o2.stop(t + 1.05);
+}
+
+const VOICES = { peg: playPluck, bell: playBell, bumper: playThump, ramp: playChime };
+
+/* ============================== parts ============================== */
+
+const PART_DEFS = {
+  peg:    { cost: 1, r: 9,  rest: 0.72, label: 'Peg',    cool: 0.11 },
+  bell:   { cost: 2, r: 16, rest: 0.55, label: 'Bell',   cool: 0.16 },
+  bumper: { cost: 2, r: 13, rest: 1.05, label: 'Bumper', cool: 0.12 },
+  ramp:   { cost: 2, len: 116, thick: 5, rest: 0.34, label: 'Ramp', cool: 0.16 },
+};
+
+let parts = [];
+let marbles = [];
+let particles = [], ripples = [], labels = [];
+let spawner = { x: 0, y: TOP + 26 };
+
+function makePart(type, x, y, angle = 0) {
+  return { type, x, y, angle, flash: 0, lastHit: -9, ...PART_DEFS[type] };
+}
+const partsCost = () => parts.reduce((s, p) => s + p.cost, 0);
+
+// tuned against the sim (exact floats matter — trajectories compound): a ramp zigzag
+// carries each marble down a descending melody into the bell, bumper, and peg cluster
+// for ~10 notes per drop; the last peg sits just off the path, begging to be nudged in
+function starterLayout() {
+  const cxm = W / 2 + 110;      // uniform shift keeps the tuned trajectories intact
+  parts = [
+    makePart('ramp',   cxm - 211.97638649586415, TOP + 190.21300571113778,  0.356864377738206),
+    makePart('ramp',   cxm - 57.66537303243765,  TOP + 291.0956782597823,  -0.3910297637307475),
+    makePart('ramp',   cxm - 152.03366919426205, TOP + 383.20737407641127,  0.3739478078417041),
+    makePart('ramp',   cxm - 24.361745144645013, TOP + 487.0445032683818,  -0.3128859104082978),
+    makePart('bell',   cxm - 157.26126388874727, TOP + 556.7737705709362),
+    makePart('bumper', cxm - 170.4027002288778,  TOP + 601.595021716174),
+    makePart('peg',    cxm - 81.06999403814648,  TOP + 583.7705864796449),
+    makePart('peg',    cxm - 199.9619090622156,  TOP + 510.92738892710906),
+  ];
+  spawner.x = cxm - 250;
+}
+starterLayout();
+
+/* ============================== physics ============================== */
+
+const FIXED = 1 / 120;
+let simClock = 0, spawnTimer = SPAWN_EVERY * 0.55, marbleSeq = 0;
+let paused = false, started = false, muted = false;
+
+function spawnMarble() {
+  marbles.push({
+    x: spawner.x, y: spawner.y + 14, vx: 0, vy: 30,
+    r: 7, hue: (mood.hue + (marbleSeq++ % 5) * 24) % 360,
+    trail: [], hits: 0,
+  });
+}
+
+let hitTimes = [];              // timestamps for ♪/min
+let recentRuns = [];            // hit counts of last finished marbles → resonance
+const RES_TARGET = 14;          // starter run lands ~10 — the meter asks for more
+
+function onHit(part, impact, hx, hy) {
+  const now = simClock;
+  if (now - part.lastHit < part.cool) return;
+  part.lastHit = now;
+  part.flash = 1;
+
+  const ni = noteAt(hy);
+  const n = notes[ni];
+  const hue = noteHue(ni);
+  const vel = clamp(impact / 650, 0.25, 1);
+
+  if (AC && !muted) VOICES[part.type](n.freq, vel, hx);
+
+  hitTimes.push(performance.now());
+  ripples.push({ x: hx, y: hy, r: 6, max: 34 + vel * 46, life: 1, hue });
+  labels.push({ x: hx, y: hy - 14, text: n.name, life: 1, hue });
+  for (let i = 0; i < 5; i++) {
+    const a = Math.random() * Math.PI * 2, s = 40 + Math.random() * 110 * vel;
+    particles.push({ x: hx, y: hy, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 30, life: 0.55, hue });
+  }
+}
+
+function step(dt) {
+  simClock += dt;
+
+  // spawner
+  spawnTimer += dt;
+  if (spawnTimer >= SPAWN_EVERY && marbles.length < MAX_MARBLES) {
+    spawnTimer = 0;
+    spawnMarble();
+  }
+
+  for (let mi = marbles.length - 1; mi >= 0; mi--) {
+    const m = marbles[mi];
+    m.vy += GRAV * dt;
+    const sp = Math.hypot(m.vx, m.vy);
+    if (sp > 1500) { m.vx *= 1500 / sp; m.vy *= 1500 / sp; }
+    m.x += m.vx * dt;
+    m.y += m.vy * dt;
+
+    // walls
+    if (m.x < m.r)     { m.x = m.r;     m.vx = Math.abs(m.vx) * 0.5; }
+    if (m.x > W - m.r) { m.x = W - m.r; m.vx = -Math.abs(m.vx) * 0.5; }
+
+    for (const p of parts) {
+      if (p.type === 'ramp') collideRamp(m, p);
+      else collideCircle(m, p);
+    }
+
+    if (m.y > H + 50) {
+      recentRuns.push(m.hits);
+      if (recentRuns.length > 5) recentRuns.shift();
+      marbles.splice(mi, 1);
+    }
+  }
+}
+
+function collideCircle(m, p) {
+  const dx = m.x - p.x, dy = m.y - p.y;
+  const minD = m.r + p.r;
+  const d2 = dx * dx + dy * dy;
+  if (d2 >= minD * minD || d2 === 0) return;
+  const d = Math.sqrt(d2), nx = dx / d, ny = dy / d;
+  m.x = p.x + nx * minD; m.y = p.y + ny * minD;
+  const vn = m.vx * nx + m.vy * ny;
+  if (vn < 0) {
+    m.vx -= (1 + p.rest) * vn * nx;
+    m.vy -= (1 + p.rest) * vn * ny;
+    if (p.type === 'bumper') { m.vx += nx * 200; m.vy += ny * 200; }
+    const impact = -vn;
+    if (impact > 55) { m.hits++; onHit(p, impact, m.x, m.y); }
+  }
+}
+
+function collideRamp(m, p) {
+  const hx = Math.cos(p.angle) * p.len / 2, hy = Math.sin(p.angle) * p.len / 2;
+  const ax = p.x - hx, ay = p.y - hy, abx = hx * 2, aby = hy * 2;
+  const t = clamp(((m.x - ax) * abx + (m.y - ay) * aby) / (abx * abx + aby * aby), 0, 1);
+  const px = ax + abx * t, py = ay + aby * t;
+  let dx = m.x - px, dy = m.y - py;
+  let d = Math.hypot(dx, dy);
+  const minD = m.r + p.thick;
+  if (d >= minD) return;
+  if (d < 0.0001) { dx = 0; dy = -1; d = 1; }
+  const nx = dx / d, ny = dy / d;
+  m.x = px + nx * minD; m.y = py + ny * minD;
+  const vn = m.vx * nx + m.vy * ny;
+  if (vn < 0) {
+    m.vx -= (1 + p.rest) * vn * nx;
+    m.vy -= (1 + p.rest) * vn * ny;
+    const impact = -vn;
+    if (impact > 150) { m.hits++; onHit(p, impact, px, py); }  // only real strikes ring, rolling stays quiet
+  }
+}
+
+/* ============================== rendering ============================== */
+
+const dust = Array.from({ length: 46 }, () => ({
+  x: Math.random(), y: Math.random(), r: 0.6 + Math.random() * 1.5,
+  s: 4 + Math.random() * 9, ph: Math.random() * 7,
+}));
+
+function render(dt) {
+  // background
+  const bg = cx.createLinearGradient(0, 0, 0, H);
+  bg.addColorStop(0, '#05060f');
+  bg.addColorStop(0.55, '#080b1c');
+  bg.addColorStop(1, '#0b0e24');
+  cx.fillStyle = bg;
+  cx.fillRect(0, 0, W, H);
+
+  const glow = cx.createRadialGradient(W / 2, H * 0.35, 60, W / 2, H * 0.35, H * 0.85);
+  glow.addColorStop(0, `hsla(${mood.hue}, 70%, 50%, 0.05)`);
+  glow.addColorStop(1, 'transparent');
+  cx.fillStyle = glow;
+  cx.fillRect(0, 0, W, H);
+
+  // drifting dust
+  cx.fillStyle = 'rgba(190,205,255,0.10)';
+  for (const p of dust) {
+    p.y -= p.s * dt / H;
+    if (p.y < 0) { p.y = 1; p.x = Math.random(); }
+    const wob = Math.sin(simClock * 0.6 + p.ph) * 8;
+    cx.beginPath();
+    cx.arc(p.x * W + wob, p.y * H, p.r, 0, 7);
+    cx.fill();
+  }
+
+  drawPitchGuides();
+
+  // ripples
+  for (let i = ripples.length - 1; i >= 0; i--) {
+    const r = ripples[i];
+    r.life -= dt * 1.7; r.r += (r.max - r.r) * dt * 7;
+    if (r.life <= 0) { ripples.splice(i, 1); continue; }
+    cx.strokeStyle = `hsla(${r.hue}, 90%, 68%, ${r.life * 0.55})`;
+    cx.lineWidth = 1.6;
+    cx.beginPath(); cx.arc(r.x, r.y, r.r, 0, 7); cx.stroke();
+  }
+
+  for (const p of parts) drawPart(p, dt);
+  drawSpawner();
+
+  // marble trails + bodies
+  for (const m of marbles) {
+    m.trail.push({ x: m.x, y: m.y });
+    if (m.trail.length > 11) m.trail.shift();
+    for (let i = 1; i < m.trail.length; i++) {
+      const a = i / m.trail.length;
+      cx.strokeStyle = `hsla(${m.hue}, 90%, 72%, ${a * 0.3})`;
+      cx.lineWidth = m.r * a * 1.2;
+      cx.lineCap = 'round';
+      cx.beginPath();
+      cx.moveTo(m.trail[i - 1].x, m.trail[i - 1].y);
+      cx.lineTo(m.trail[i].x, m.trail[i].y);
+      cx.stroke();
+    }
+    cx.save();
+    cx.shadowColor = `hsla(${m.hue}, 95%, 70%, 0.95)`;
+    cx.shadowBlur = 16;
+    const grad = cx.createRadialGradient(m.x - 2, m.y - 3, 1, m.x, m.y, m.r);
+    grad.addColorStop(0, '#ffffff');
+    grad.addColorStop(0.6, `hsl(${m.hue}, 90%, 78%)`);
+    grad.addColorStop(1, `hsl(${m.hue}, 85%, 55%)`);
+    cx.fillStyle = grad;
+    cx.beginPath(); cx.arc(m.x, m.y, m.r, 0, 7); cx.fill();
+    cx.restore();
+  }
+
+  // sparks
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt; if (p.life <= 0) { particles.splice(i, 1); continue; }
+    p.vy += 320 * dt; p.x += p.vx * dt; p.y += p.vy * dt;
+    cx.fillStyle = `hsla(${p.hue}, 95%, 72%, ${p.life * 1.6})`;
+    cx.beginPath(); cx.arc(p.x, p.y, 1.7, 0, 7); cx.fill();
+  }
+
+  // floating note names
+  cx.textAlign = 'center';
+  cx.font = '600 13px "Segoe UI", system-ui';
+  for (let i = labels.length - 1; i >= 0; i--) {
+    const l = labels[i];
+    l.life -= dt * 1.1; l.y -= 26 * dt;
+    if (l.life <= 0) { labels.splice(i, 1); continue; }
+    cx.fillStyle = `hsla(${l.hue}, 90%, 78%, ${l.life})`;
+    cx.fillText(l.text, l.x, l.y);
+  }
+}
+
+function drawPitchGuides() {
+  // faint horizontal bands: the y → pitch ladder, roots marked
+  cx.textAlign = 'right';
+  cx.font = '10px "Segoe UI", system-ui';
+  const n = notes.length;
+  for (let i = 0; i < n; i++) {
+    const y = TOP + (1 - (i + 0.5) / n) * (H - TOP);
+    const isRoot = notes[i].midi % 12 === mood.baseMidi % 12;
+    cx.strokeStyle = `hsla(${noteHue(i)}, 70%, 65%, ${isRoot ? 0.10 : 0.035})`;
+    cx.lineWidth = 1;
+    cx.beginPath(); cx.moveTo(0, y); cx.lineTo(W, y); cx.stroke();
+    if (isRoot) {
+      cx.fillStyle = `hsla(${noteHue(i)}, 70%, 70%, 0.30)`;
+      cx.fillText(notes[i].name, W - 10, y - 3);
+    }
+  }
+}
+
+function drawPart(p, dt) {
+  p.flash = Math.max(0, p.flash - dt * 4);
+  const hue = noteHue(noteAt(p.y));
+  const fl = p.flash;
+  cx.save();
+
+  if (p.type === 'ramp') {
+    const hx = Math.cos(p.angle) * p.len / 2, hy = Math.sin(p.angle) * p.len / 2;
+    cx.shadowColor = `hsla(${hue}, 90%, 65%, ${0.5 + fl * 0.5})`;
+    cx.shadowBlur = 10 + fl * 18;
+    cx.strokeStyle = `hsla(${hue}, 75%, ${62 + fl * 25}%, 0.95)`;
+    cx.lineWidth = p.thick * 2 - 3 + fl * 2;
+    cx.lineCap = 'round';
+    cx.beginPath();
+    cx.moveTo(p.x - hx, p.y - hy);
+    cx.lineTo(p.x + hx, p.y + hy);
+    cx.stroke();
+    // caps
+    cx.shadowBlur = 0;
+    cx.fillStyle = `hsla(${hue}, 80%, 80%, .9)`;
+    cx.beginPath(); cx.arc(p.x - hx, p.y - hy, 3, 0, 7); cx.fill();
+    cx.beginPath(); cx.arc(p.x + hx, p.y + hy, 3, 0, 7); cx.fill();
+
+  } else {
+    const R = p.r * (1 + fl * 0.3);
+    cx.shadowColor = `hsla(${hue}, 90%, 65%, ${0.55 + fl * 0.45})`;
+    cx.shadowBlur = 12 + fl * 22;
+
+    if (p.type === 'peg') {
+      const g = cx.createRadialGradient(p.x, p.y, 1, p.x, p.y, R);
+      g.addColorStop(0, `hsla(${hue}, 90%, ${80 + fl * 15}%, 1)`);
+      g.addColorStop(1, `hsla(${hue}, 80%, 48%, 0.9)`);
+      cx.fillStyle = g;
+      cx.beginPath(); cx.arc(p.x, p.y, R, 0, 7); cx.fill();
+
+    } else if (p.type === 'bell') {
+      cx.strokeStyle = `hsla(${hue}, 85%, ${70 + fl * 20}%, 0.95)`;
+      cx.lineWidth = 2.5;
+      cx.beginPath(); cx.arc(p.x, p.y, R, 0, 7); cx.stroke();
+      cx.fillStyle = `hsla(${hue}, 85%, 65%, ${0.14 + fl * 0.4})`;
+      cx.beginPath(); cx.arc(p.x, p.y, R, 0, 7); cx.fill();
+      cx.shadowBlur = 0;
+      cx.fillStyle = `hsla(${hue}, 90%, 82%, .95)`;
+      cx.beginPath(); cx.arc(p.x, p.y, 3.5 + fl * 2, 0, 7); cx.fill();
+
+    } else { // bumper
+      cx.strokeStyle = `hsla(${hue}, 90%, ${68 + fl * 22}%, 1)`;
+      cx.lineWidth = 3.5 + fl * 2;
+      cx.beginPath(); cx.arc(p.x, p.y, R, 0, 7); cx.stroke();
+      cx.strokeStyle = `hsla(${hue}, 90%, 80%, ${0.35 + fl * 0.5})`;
+      cx.lineWidth = 1.2;
+      cx.beginPath(); cx.arc(p.x, p.y, R * 0.55, 0, 7); cx.stroke();
+    }
+  }
+  cx.restore();
+
+  if (p === hovered && !dragging) {
+    cx.strokeStyle = 'rgba(255,255,255,0.35)';
+    cx.setLineDash([4, 5]);
+    cx.lineWidth = 1;
+    cx.beginPath();
+    cx.arc(p.x, p.y, (p.r || p.len / 2) + 9, 0, 7);
+    cx.stroke();
+    cx.setLineDash([]);
+  }
+}
+
+function drawSpawner() {
+  const s = spawner;
+  const prog = clamp(spawnTimer / SPAWN_EVERY, 0, 1);
+  cx.save();
+  cx.shadowColor = `hsla(${mood.hue}, 90%, 65%, .8)`;
+  cx.shadowBlur = 14;
+  // hopper
+  cx.fillStyle = `hsla(${mood.hue}, 60%, 75%, .9)`;
+  cx.beginPath();
+  cx.moveTo(s.x - 15, s.y - 12); cx.lineTo(s.x + 15, s.y - 12);
+  cx.lineTo(s.x + 5, s.y + 4);   cx.lineTo(s.x - 5, s.y + 4);
+  cx.closePath(); cx.fill();
+  // progress ring → next drop
+  cx.shadowBlur = 0;
+  cx.strokeStyle = `hsla(${mood.hue}, 80%, 70%, .28)`;
+  cx.lineWidth = 2;
+  cx.beginPath(); cx.arc(s.x, s.y - 4, 22, 0, 7); cx.stroke();
+  cx.strokeStyle = `hsla(${mood.hue}, 95%, 72%, .9)`;
+  cx.beginPath(); cx.arc(s.x, s.y - 4, 22, -Math.PI / 2, -Math.PI / 2 + prog * Math.PI * 2); cx.stroke();
+  cx.restore();
+}
+
+/* ============================== input ============================== */
+
+const TOOL_ICONS = {
+  peg:    '<svg viewBox="0 0 26 26"><circle cx="13" cy="13" r="5.5" fill="currentColor"/></svg>',
+  bell:   '<svg viewBox="0 0 26 26"><circle cx="13" cy="13" r="8.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="13" cy="13" r="2.4" fill="currentColor"/></svg>',
+  bumper: '<svg viewBox="0 0 26 26"><circle cx="13" cy="13" r="8" fill="none" stroke="currentColor" stroke-width="3"/></svg>',
+  ramp:   '<svg viewBox="0 0 26 26"><line x1="4" y1="19" x2="22" y2="8" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>',
+  erase:  '<svg viewBox="0 0 26 26"><line x1="7" y1="7" x2="19" y2="19" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/><line x1="19" y1="7" x2="7" y2="19" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></svg>',
+};
+
+let tool = 'peg';
+let hovered = null, dragging = null, dragOff = { x: 0, y: 0 }, dragSpawner = false;
+const mouse = { x: 0, y: 0 };
+
+function buildPalette() {
+  const pal = document.getElementById('palette');
+  const items = [
+    ['peg', '1'], ['bell', '2'], ['bumper', '3'], ['ramp', '4'], ['erase', 'E'],
+  ];
+  for (const [id, key] of items) {
+    const d = document.createElement('div');
+    d.className = 'tool' + (id === tool ? ' on' : '');
+    d.dataset.tool = id;
+    const def = PART_DEFS[id];
+    d.innerHTML = `<span class="key">${key}</span>` +
+      (def ? `<span class="cost">${def.cost}◆</span>` : '') +
+      TOOL_ICONS[id] +
+      `<span class="nm">${def ? def.label : 'Erase'}</span>`;
+    d.onclick = () => setTool(id);
+    pal.appendChild(d);
+  }
+}
+function setTool(id) {
+  tool = id;
+  document.querySelectorAll('.tool').forEach(el => el.classList.toggle('on', el.dataset.tool === id));
+}
+buildPalette();
+
+function partAt(x, y) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    if (p.type === 'ramp') {
+      const hx = Math.cos(p.angle) * p.len / 2, hy = Math.sin(p.angle) * p.len / 2;
+      const ax = p.x - hx, ay = p.y - hy, abx = hx * 2, aby = hy * 2;
+      const t = clamp(((x - ax) * abx + (y - ay) * aby) / (abx * abx + aby * aby), 0, 1);
+      if (Math.hypot(x - (ax + abx * t), y - (ay + aby * t)) < 14) return p;
+    } else if (Math.hypot(x - p.x, y - p.y) < p.r + 7) return p;
+  }
+  return null;
+}
+
+cv.addEventListener('mousemove', e => {
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  if (dragSpawner) { spawner.x = clamp(mouse.x, 30, W - 30); return; }
+  if (dragging) {
+    dragging.x = clamp(mouse.x - dragOff.x, 10, W - 10);
+    dragging.y = clamp(mouse.y - dragOff.y, TOP + 20, H - 14);
+    return;
+  }
+  hovered = partAt(mouse.x, mouse.y);
+  cv.style.cursor = hovered ? 'grab' : 'crosshair';
+});
+
+cv.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  const x = e.clientX, y = e.clientY;
+
+  if (Math.hypot(x - spawner.x, y - spawner.y) < 26) { dragSpawner = true; return; }
+
+  const p = partAt(x, y);
+  if (p) {
+    if (tool === 'erase') { parts.splice(parts.indexOf(p), 1); return; }
+    dragging = p; dragOff.x = x - p.x; dragOff.y = y - p.y;
+    cv.style.cursor = 'grabbing';
+    return;
+  }
+  if (tool === 'erase' || y < TOP + 10) return;
+
+  const def = PART_DEFS[tool];
+  if (partsCost() + def.cost > BUDGET) {
+    const chip = document.getElementById('chipParts');
+    chip.classList.remove('alert'); void chip.offsetWidth; chip.classList.add('alert');
+    return;
+  }
+  parts.push(makePart(tool, x, y, tool === 'ramp' ? 0.28 : 0));
+});
+
+addEventListener('mouseup', () => {
+  dragging = null; dragSpawner = false;
+  cv.style.cursor = hovered ? 'grab' : 'crosshair';
+});
+
+cv.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const p = partAt(e.clientX, e.clientY);
+  if (p) parts.splice(parts.indexOf(p), 1);
+});
+
+cv.addEventListener('wheel', e => {
+  const p = partAt(e.clientX, e.clientY);
+  if (p && p.type === 'ramp') {
+    e.preventDefault();
+    p.angle += (e.deltaY > 0 ? 1 : -1) * Math.PI / 36;
+  }
+}, { passive: false });
+
+addEventListener('keydown', e => {
+  if (e.key === '1') setTool('peg');
+  if (e.key === '2') setTool('bell');
+  if (e.key === '3') setTool('bumper');
+  if (e.key === '4') setTool('ramp');
+  if (e.key === 'e' || e.key === 'E') setTool('erase');
+  if (e.key === 'm' || e.key === 'M') toggleMute();
+  if (e.key === ' ') { e.preventDefault(); togglePause(); }
+});
+
+/* ============================== hud wiring ============================== */
+
+const moodsEl = document.getElementById('moods');
+for (const m of MOODS) {
+  const b = document.createElement('div');
+  b.className = 'mood' + (m === mood ? ' on' : '');
+  b.style.setProperty('--mh', m.hue);
+  b.innerHTML = `<span class="dot"></span>${m.name}`;
+  b.onclick = () => {
+    mood = m;
+    buildNotes();
+    if (AC) startDrone();
+    document.querySelectorAll('.mood').forEach(el => el.classList.remove('on'));
+    b.classList.add('on');
+  };
+  moodsEl.appendChild(b);
+}
+
+function togglePause() {
+  paused = !paused;
+  document.getElementById('btnPause').textContent = paused ? '▶' : '⏸';
+  if (AC) paused ? AC.suspend() : AC.resume();
+}
+function toggleMute() {
+  muted = !muted;
+  document.getElementById('btnMute').textContent = muted ? '🔇' : '🔊';
+  if (master) master.gain.value = muted ? 0 : 0.9;
+}
+document.getElementById('btnPause').onclick = togglePause;
+document.getElementById('btnMute').onclick = toggleMute;
+document.getElementById('btnClear').onclick = () => { parts = []; };
+
+let hudTimer = 0;
+function updateHud(dt) {
+  hudTimer += dt;
+  if (hudTimer < 0.25) return;
+  hudTimer = 0;
+
+  document.getElementById('chipParts').innerHTML = `parts <b>${partsCost()}/${BUDGET}</b>`;
+
+  const now = performance.now();
+  hitTimes = hitTimes.filter(t => now - t < 60000);
+  document.getElementById('chipNotes').innerHTML = `<b>${hitTimes.length}</b> ♪/min`;
+
+  const avg = recentRuns.length ? recentRuns.reduce((a, b) => a + b, 0) / recentRuns.length : 0;
+  const frac = clamp(avg / RES_TARGET, 0, 1);
+  document.getElementById('resfill').style.width = (frac * 100) + '%';
+  document.getElementById('resonance').classList.toggle('full', frac >= 1);
+}
+
+/* ============================== main loop ============================== */
+
+let last = performance.now(), acc = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (W !== innerWidth || H !== innerHeight) resize(); // hidden tabs can load at 0×0
+  let dt = (now - last) / 1000; last = now;
+  dt = Math.min(dt, 0.05);
+
+  if (started && !paused) {
+    acc += dt;
+    while (acc >= FIXED) { step(FIXED); acc -= FIXED; }
+  }
+  render(dt);
+  updateHud(dt);
+}
+requestAnimationFrame(frame);
+
+/* ============================== start ============================== */
+
+document.getElementById('overlay').addEventListener('click', () => {
+  initAudio();
+  started = true;
+  document.getElementById('overlay').classList.add('gone');
+});
+</script>
+</body>
+</html>
